@@ -1,0 +1,152 @@
+reset;
+model matched_bs.mod; 
+data matched_bs.dat; 
+
+ 	
+let {i in 1..T1, j in 1..T2:(CT[i,"windsp"]-CC[j,"windsp"])^2 >36} NW[i,j]:=1; 
+let {i in 1..T1, j in 1..T2:(CT[i,"hum"]-CC[j,"hum"])^2 > 36} NH[i,j]:=1; 
+let {i in 1..T1, j in 1..T2:(CT[i,"temp"]-CC[j,"temp"])^2 >4} NT[i,j]:=1; 
+
+
+let {i in 1..T1, j in 1..T2}DD[i,j]:=
+(CT[i,"season"]-CC[j,"season"])^2+(CT[i,"yr"]-CC[j,"yr"])^2+(CT[i,"workday"]-CC[j,"workday"])^2+NT[i,j]+NW[i,j]+NH[i,j];
+
+let {i in 1..T1, j in 1..T2:DD[i,j]=0}D[i,j]:=1;
+
+problem z_test: a, obj1,max_pair1,max_pair2,avoid_repeat1,avoid_repeat2,pair_cons; 
+
+problem z_test1: a, obj1,constraint1,max_pair1,max_pair2,avoid_repeat1,avoid_repeat2,pair_cons; 
+
+
+param stage default 0;
+param stage_limit:=3;
+param l_limit:=25;
+#param scale  default 1; 
+param h:=0.001;
+
+param b_L1{0..stage_limit} default  0; 
+param b_L2{0..stage_limit} default 0;
+
+param d_L{1..stage_limit} default 0; 
+param increment {1..stage_limit} default 0;
+
+param oofvlog{1..stage_limit,0..l_limit} default 0; 
+param b_llog{1..stage_limit,0..l_limit} default 0; 
+param d_llog{1..stage_limit,0..l_limit} default 0; 
+
+param gaplog {1..stage_limit,1..l_limit} default 0;
+param upperboundlog{1..stage_limit,1..l_limit} default 0; 
+param lowerboundlog{1..stage_limit,2..l_limit} default 0;
+param thresholdlog{1..stage_limit} default 0;
+
+param B_L_initial{1..stage_limit} default 0; 
+param B_L_final{1..stage_limit} default 0;
+
+
+set Upperbound_points{1..stage_limit} ordered; 
+
+
+for {nn in n_set}{
+
+let n:=nn;
+
+problem z_test;
+option solver cplex; 
+option cplex_options 'mipgap=0.001';
+solve;
+display sum {i in 1..T1,j in 1..T2} (((OT[i]-OC[j])^2)*a[i,j]);
+let b_L2[0]:=sum{i in 1..T1,j in 1..T2} (((OT[i]-OC[j])^2)*a[i,j].val); 
+let b_L1[0]:=0;
+
+printf"\nh=   %f\", h>>Out_min_file_3stage.txt;;
+printf"\nn=   %d\", n>>Out_min_file_3stage.txt;;
+
+repeat{
+
+let stage:=stage+1;
+let b_L2[stage]:=b_L2[stage-1];
+let b_L1[stage]:=b_L1[stage-1];
+
+printf "\nSTAGE %d\n\n", stage;
+printf "\n\n\n\STAGE %d\n\n", stage>>Out_min_file_3stage.txt;
+printf"\n\n\        b_llog       oofvlog         gaplog        upperboundlog     lowerboundlog 	  d_llog\", 0>>Out_min_file_3stage.txt;
+
+let increment[stage]:=((b_L2[stage]-b_L1[stage])/(l_limit-1)); 
+
+for {k in 1..l_limit} { 
+		
+		printf "\nSubDivision %d\n\n", k;
+
+		let b_llog[stage,k]:=b_L1[stage]+(k)*increment[stage]; 
+		let b_l:=b_llog[stage,k];
+
+		problem z_test1; 
+		option solver cplex; 
+		option cplex_options 'mipgap=0.001';
+		solve z_test1;
+		
+		let oofvlog[stage,k]:=obj1; 
+		let d_llog[stage,k]:=(oofvlog[stage,k])/n; 
+					};
+					
+for {k in 2..l_limit} { 
+		
+		if d_llog[stage,k]>0 then {
+		
+			if ((b_llog[stage,k-1])/n) >(d_llog[stage,k])^2 and ((b_llog[stage,k])/n) >(d_llog[stage,k])^2 then {   
+				
+				let upperboundlog[stage,k]:=(((n)^0.5)*d_llog[stage,k])/((((b_llog[stage,k-1])/n)-((d_llog[stage,k])^2))^0.5);
+				
+				let lowerboundlog[stage,k]:=(((n)^0.5)*d_llog[stage,k])/((((b_llog[stage,k])/n)-((d_llog[stage,k])^2))^0.5);
+			
+				let gaplog[stage,k]:= upperboundlog[stage,k]- lowerboundlog[stage,k];	
+				}
+			};
+			
+			
+		if d_llog[stage,k]<0 then {
+		
+			if ((b_llog[stage,k-1])/n) >(d_llog[stage,k])^2 and ((b_llog[stage,k])/n) >(d_llog[stage,k])^2 then {   
+				
+				let upperboundlog[stage,k]:=(((n)^0.5)*d_llog[stage,k])/((((b_llog[stage,k])/n)-((d_llog[stage,k])^2))^0.5);
+				
+				let lowerboundlog[stage,k]:=(((n)^0.5)*d_llog[stage,k])/((((b_llog[stage,k-1])/n)-((d_llog[stage,k])^2))^0.5);
+			
+				let gaplog[stage,k]:= upperboundlog[stage,k]- lowerboundlog[stage,k];	
+				}
+			};
+
+
+printf"\n   %10.0f       %10.5f     %10.7f      %10.7f       %10.7f	     %10.3f\",
+b_llog[stage,k], oofvlog[stage,k], gaplog[stage,k], upperboundlog[stage,k], lowerboundlog[stage,k], d_llog[stage,k]>>Out_min_file_3stage.txt;
+			   
+			};
+let thresholdlog[stage]:= min{kk in 2..l_limit}upperboundlog[stage,kk];
+
+
+printf"\n\n\n  The minimum value of upperbound is  %10.3f\", thresholdlog[stage]>>Out_min_file_3stage.txt;
+
+
+	
+ 					
+let Upperbound_points[stage] :={kk in 2..l_limit: lowerboundlog[stage,kk] <= thresholdlog[stage]};
+
+let B_L_initial[stage]:= first(Upperbound_points[stage]); 
+let B_L_final[stage]:= last(Upperbound_points[stage]);
+
+let b_L2[stage]:=b_llog[stage,B_L_final[stage]];
+let b_L1[stage]:=b_llog[stage,B_L_initial[stage]];
+
+
+}
+
+ 			
+until stage=stage_limit or (
+ (b_llog[stage,B_L_final[stage]-1])/n>(d_llog[stage,B_L_final[stage]])^2  and gaplog[stage,B_L_final[stage]]<=h) or card(Upperbound_points[stage])<=2;
+ 	
+reset data stage,b_llog, oofvlog, gaplog, upperboundlog, lowerboundlog, d_llog,B_L_initial,B_L_final, b_L1, b_L2, thresholdlog,Upperbound_points ; 			
+
+};
+
+
+

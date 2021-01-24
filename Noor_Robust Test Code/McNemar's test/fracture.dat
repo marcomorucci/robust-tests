@@ -1,0 +1,18 @@
+#Other data (total # of treatment and control units, covariates set and total # of discordant pairs (n)) in AMPL format for case study 3- Global Longitudinal Study of Osteoporosis in women (GLOW)
+
+
+param T2:=465;
+param T1:=35;
+
+set C1:=  PRIORFRAC AGE WEIGHT    HEIGHT    BMI       PREMENO   MOMFRAC   ARMASSIST;
+
+
+#param n:=30;
+
+
+
+
+
+
+
+
